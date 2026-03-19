@@ -1,0 +1,58 @@
+# ─── Python ───────────────────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.egg
+*.egg-info/
+dist/
+build/
+*.whl
+
+# ─── Virtual environments ────────────────────────────────────────────────────
+venv/
+.venv/
+env/
+ENV/
+
+# ─── Environment variables / secrets ─────────────────────────────────────────
+.env
+
+# ─── IDE / Editor ────────────────────────────────────────────────────────────
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.project
+.settings/
+
+# ─── OS files ────────────────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ─── Data & model artifacts (large / regenerable) ────────────────────────────
+data/*.parquet
+data/*.csv
+data/*.json
+data/*.joblib
+data/xgb_model.joblib
+data/lgbm_model.joblib
+data/model_metadata.json
+data/feature_importance.png
+!data/.gitkeep
+
+# ─── Jupyter / IPython ───────────────────────────────────────────────────────
+.ipynb_checkpoints/
+*.ipynb
+
+# ─── pytest / coverage ───────────────────────────────────────────────────────
+.pytest_cache/
+.coverage
+htmlcov/
+
+# ─── Misc ────────────────────────────────────────────────────────────────────
+*.log
+*.bak
+*.tmp

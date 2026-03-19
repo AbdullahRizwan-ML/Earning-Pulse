@@ -33,6 +33,8 @@ Thumbs.db
 desktop.ini
 
 # ─── Data & model artifacts (large / regenerable) ────────────────────────────
+data/*.meta
+data/cache/
 data/*.parquet
 data/*.csv
 data/*.json
@@ -41,6 +43,7 @@ data/xgb_model.joblib
 data/lgbm_model.joblib
 data/model_metadata.json
 data/feature_importance.png
+data/feature_medians.json
 !data/.gitkeep
 
 # ─── Jupyter / IPython ───────────────────────────────────────────────────────

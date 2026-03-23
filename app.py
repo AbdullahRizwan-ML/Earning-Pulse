@@ -338,87 +338,131 @@ with tab2:
     st.markdown("*Generate predictions for all 15 tickers in our training universe.*")
 
     load_watchlist = st.button("🔄 Generate Predictions", type="primary")
+    st.caption("Predictions based on most recent quarter's pre-computed features. Click 'Predict a Stock' tab for live real-time analysis.")
 
     if load_watchlist:
-        with st.spinner("🔄 Generating predictions for the training universe..."):
+        with st.spinner("🔄 Loading cached data for the training universe..."):
             try:
                 from src.data_loader import TRAINING_TICKERS
-                from src.predict import predict_single
+                from src.model import load_models
+                from src.utils import DATA_DIR, SECTOR_MAP
+                import joblib
 
-                artifacts = load_model_artifacts()
-                predictions = []
+                csv_path = DATA_DIR / "earnings_dataset.csv"
+                if not csv_path.exists():
+                    st.error("Training dataset not found. Run 'python -m src.model' first.")
+                else:
+                    df = pd.read_csv(csv_path)
+                    
+                    artifacts = load_model_artifacts()
+                    if artifacts["models_available"]:
+                        xgb_model, lgbm_model, _, feature_names = load_models()
+                        scaler_path = DATA_DIR / "feature_scaler.joblib"
+                        scaler = joblib.load(scaler_path) if scaler_path.exists() else None
+                    else:
+                        xgb_model, lgbm_model, feature_names, scaler = None, None, [], None
 
-                for ticker in TRAINING_TICKERS:
-                    try:
-                        if artifacts["models_available"]:
-                            pred = predict_single(ticker)
+                    predictions = []
+                    
+                    for ticker in TRAINING_TICKERS:
+                        ticker_df = df[df["ticker"] == ticker]
+                        if ticker_df.empty:
+                            continue
+                        
+                        # Get most recent row
+                        ticker_df = ticker_df.sort_values("quarter_end")
+                        recent_row = ticker_df.iloc[-1:]
+                        
+                        try:
+                            if artifacts["models_available"] and feature_names:
+                                X = recent_row[feature_names].apply(pd.to_numeric, errors="coerce").fillna(0)
+                                if scaler:
+                                    X_scaled = pd.DataFrame(scaler.transform(X), columns=X.columns, index=X.index)
+                                else:
+                                    X_scaled = X
+                                
+                                xgb_proba = float(xgb_model.predict_proba(X_scaled)[:, 1][0])
+                                lgbm_proba = float(lgbm_model.predict_proba(X_scaled)[:, 1][0])
+                                ensemble_proba = (xgb_proba + lgbm_proba) / 2
+                                
+                                # Confidence level
+                                distance = abs(ensemble_proba - 0.5)
+                                if distance > 0.25:
+                                    conf = "High"
+                                elif distance > 0.10:
+                                    conf = "Medium"
+                                else:
+                                    conf = "Low"
+                                    
+                                prediction = "BEAT" if ensemble_proba >= 0.5 else "MISS"
+                                
+                                predictions.append({
+                                    "ticker": ticker,
+                                    "sector": SECTOR_MAP.get(ticker, "Unknown"),
+                                    "beat_probability": ensemble_proba,
+                                    "confidence": conf,
+                                    "prediction": prediction,
+                                })
+                            else:
+                                predictions.append({
+                                    "ticker": ticker,
+                                    "sector": SECTOR_MAP.get(ticker, "Unknown"),
+                                    "beat_probability": np.random.uniform(0.3, 0.85),
+                                    "confidence": "N/A",
+                                    "prediction": "DEMO",
+                                })
+                        except Exception as e:
                             predictions.append({
                                 "ticker": ticker,
-                                "sector": pred["info"].get("sector", "Unknown"),
-                                "beat_probability": pred["beat_probability"],
-                                "confidence": pred["confidence"],
-                                "prediction": pred["prediction"],
-                            })
-                        else:
-                            predictions.append({
-                                "ticker": ticker,
-                                "sector": "Unknown",
-                                "beat_probability": np.random.uniform(0.3, 0.85),
+                                "sector": SECTOR_MAP.get(ticker, "Unknown"),
+                                "beat_probability": 0.5,
                                 "confidence": "N/A",
-                                "prediction": "DEMO",
+                                "prediction": "ERROR",
                             })
-                    except Exception:
-                        predictions.append({
-                            "ticker": ticker,
-                            "sector": "Unknown",
-                            "beat_probability": 0.5,
-                            "confidence": "N/A",
-                            "prediction": "ERROR",
-                        })
 
-                if not artifacts["models_available"]:
-                    st.warning("⚠️ Showing demo predictions (models not trained).")
+                    if not artifacts["models_available"]:
+                        st.warning("⚠️ Showing demo predictions (models not trained).")
 
-                display_df = pd.DataFrame(predictions)
-                display_df = display_df.sort_values("beat_probability", ascending=False)
-                display_df["beat_probability"] = (display_df["beat_probability"] * 100).round(1)
+                    display_df = pd.DataFrame(predictions)
+                    display_df = display_df.sort_values("beat_probability", ascending=False)
+                    display_df["beat_probability"] = (display_df["beat_probability"] * 100).round(1)
 
-                # Color coding function
-                def color_probability(val):
-                    try:
-                        v = float(val)
-                        if v >= 65:
-                            return "background-color: rgba(0, 184, 148, 0.3); color: #00b894;"
-                        elif v >= 45:
-                            return "background-color: rgba(253, 203, 110, 0.3); color: #fdcb6e;"
-                        else:
-                            return "background-color: rgba(225, 112, 85, 0.3); color: #e17055;"
-                    except (ValueError, TypeError):
-                        return ""
+                    # Color coding function
+                    def color_probability(val):
+                        try:
+                            v = float(val)
+                            if v >= 65:
+                                return "background-color: rgba(0, 184, 148, 0.3); color: #00b894;"
+                            elif v >= 45:
+                                return "background-color: rgba(253, 203, 110, 0.3); color: #fdcb6e;"
+                            else:
+                                return "background-color: rgba(225, 112, 85, 0.3); color: #e17055;"
+                        except (ValueError, TypeError):
+                            return ""
 
-                col_map = {
-                    "ticker": "Ticker",
-                    "sector": "Sector",
-                    "beat_probability": "Beat Prob (%)",
-                    "confidence": "Confidence",
-                    "prediction": "Prediction",
-                }
-                display_df = display_df.rename(columns=col_map)
+                    col_map = {
+                        "ticker": "Ticker",
+                        "sector": "Sector",
+                        "beat_probability": "Beat Prob (%)",
+                        "confidence": "Confidence",
+                        "prediction": "Prediction",
+                    }
+                    display_df = display_df.rename(columns=col_map)
 
-                styled = display_df.style.applymap(
-                    color_probability,
-                    subset=["Beat Prob (%)"],
-                )
-                st.dataframe(styled, use_container_width=True, hide_index=True)
+                    styled = display_df.style.map(
+                        color_probability,
+                        subset=["Beat Prob (%)"],
+                    )
+                    st.dataframe(styled, use_container_width=True, hide_index=True)
 
-                # Download button
-                csv = display_df.to_csv(index=False)
-                st.download_button(
-                    "📥 Download Watchlist CSV",
-                    csv,
-                    file_name=f"earnings_watchlist_{datetime.now().strftime('%Y%m%d')}.csv",
-                    mime="text/csv",
-                )
+                    # Download button
+                    csv = display_df.to_csv(index=False)
+                    st.download_button(
+                        "📥 Download Watchlist CSV",
+                        csv,
+                        file_name=f"earnings_watchlist_{datetime.now().strftime('%Y%m%d')}.csv",
+                        mime="text/csv",
+                    )
 
             except Exception as exc:
                 st.error(f"Failed to generate predictions: {exc}")
@@ -581,7 +625,8 @@ with tab3:
     # ── Cross-Validation Folds ──
     fold_metrics = metrics.get("fold_metrics", [])
     if fold_metrics:
-        st.markdown("#### Cross-Validation Results (TimeSeriesSplit)")
+        st.markdown("#### Cross-Validation Results (GroupShuffleSplit (ticker-level holdout))")
+        st.markdown("5-fold GroupShuffleSplit — each fold holds out 3 complete companies never seen during training, testing true generalization.")
         folds_df = pd.DataFrame(fold_metrics)
         folds_df["fold"] = folds_df["fold"].astype(str).apply(lambda x: f"Fold {x}")
         st.dataframe(folds_df, use_container_width=True, hide_index=True)

@@ -149,12 +149,16 @@ def load_model_artifacts() -> Dict[str, Any]:
 
 @st.cache_data(ttl=3600)
 def load_feature_importance() -> Optional[pd.DataFrame]:
-    """Load feature importance CSV (cached for 1 hour).
+    """Load feature importance (JSON preferred, CSV fallback).
 
     Returns:
         DataFrame of feature importances, or ``None`` if not available.
     """
-    csv_path = Path(__file__).parent / "data" / "feature_importance.csv"
+    data_dir = Path(__file__).parent / "data"
+    json_path = data_dir / "feature_importance.json"
+    csv_path = data_dir / "feature_importance.csv"
+    if json_path.exists():
+        return pd.read_json(json_path)
     if csv_path.exists():
         return pd.read_csv(csv_path)
     return None
@@ -206,6 +210,11 @@ with tab1:
                     "⚠️ Models not trained yet. Run `python -m src.model` to train, "
                     "or the app will display demo results.",
                 )
+
+            st.info(
+                "💡 Live prediction uses Alpha Vantage data. "
+                "Training used 15 S&P 500 companies × ~12 quarters of historical data."
+            )
 
             with st.spinner(f"🔄 Fetching live data for {ticker}..."):
                 try:
@@ -278,19 +287,19 @@ with tab1:
                 st.markdown("#### 📅 Recent Earnings History")
                 earnings_hist = result.get("earnings_history", pd.DataFrame())
                 if isinstance(earnings_hist, pd.DataFrame) and not earnings_hist.empty:
-                    recent = earnings_hist.sort_values("earnings_date", ascending=False).head(4)
+                    recent = earnings_hist.head(4)
                     timeline_cols = st.columns(len(recent))
                     for i, (_, row) in enumerate(recent.iterrows()):
                         with timeline_cols[i]:
                             beat = row.get("beat", 0)
                             color = "🟢" if beat == 1 else "🔴"
-                            date_str = pd.to_datetime(row["earnings_date"]).strftime("%b %Y")
+                            date_str = str(row.get("earnings_date", "?"))[:10]
                             actual = row.get("actual_eps", "?")
                             est = row.get("estimated_eps", "?")
                             st.markdown(
                                 f"**{color} {date_str}**\n\n"
-                                f"Actual: ${actual:.2f}\n\n"
-                                f"Est: ${est:.2f}"
+                                f"Actual: ${actual}\n\n"
+                                f"Est: ${est}"
                             )
                 else:
                     st.info("No earnings history available for this ticker.")
@@ -300,7 +309,7 @@ with tab1:
                 features = result.get("features", {})
                 impacts = result.get("feature_impacts", {})
                 if features:
-                    from src.feature_engineering import FEATURE_REGISTRY
+                    from src.data_loader import FEATURE_REGISTRY
                     breakdown_data = []
                     for fname, fval in features.items():
                         desc = FEATURE_REGISTRY.get(fname, fname)
@@ -325,94 +334,96 @@ with tab1:
 # TAB 2 — Upcoming Earnings Watchlist
 # ═══════════════════════════════════════════════════════════════════════════════
 with tab2:
-    st.markdown("### 📋 Upcoming Earnings — Next 30 Days")
-    st.markdown("*Stocks from our S&P 500 universe with upcoming earnings announcements.*")
+    st.markdown("### 📋 Training Universe — Prediction Watchlist")
+    st.markdown("*Generate predictions for all 15 tickers in our training universe.*")
 
-    load_watchlist = st.button("🔄 Load / Refresh Watchlist", type="primary")
+    load_watchlist = st.button("🔄 Generate Predictions", type="primary")
 
     if load_watchlist:
-        with st.spinner("🔄 Scanning for upcoming earnings and generating predictions..."):
+        with st.spinner("🔄 Generating predictions for the training universe..."):
             try:
-                from src.data_ingestion import get_upcoming_earnings
-                from src.predict import predict_watchlist
+                from src.data_loader import TRAINING_TICKERS
+                from src.predict import predict_single
 
-                upcoming = get_upcoming_earnings(days_ahead=30)
+                artifacts = load_model_artifacts()
+                predictions = []
 
-                if upcoming.empty:
-                    st.info(
-                        "No upcoming earnings found in the next 30 days for our "
-                        "tracked universe. Try again closer to earnings season."
-                    )
-                else:
-                    # Generate predictions
-                    artifacts = load_model_artifacts()
-                    if artifacts["models_available"]:
-                        watchlist = predict_watchlist(upcoming)
-                    else:
-                        # Demo mode without models
-                        watchlist = upcoming.copy()
-                        np.random.seed(42)
-                        watchlist["beat_probability"] = np.random.uniform(0.3, 0.85, len(watchlist))
-                        watchlist["confidence"] = watchlist["beat_probability"].apply(
-                            lambda p: "High" if abs(p - 0.5) > 0.25 else
-                                      "Medium" if abs(p - 0.5) > 0.10 else "Low"
-                        )
-                        watchlist["prediction"] = watchlist["beat_probability"].apply(
-                            lambda p: "BEAT" if p >= 0.5 else "MISS"
-                        )
-                        st.warning("⚠️ Showing demo predictions (models not trained).")
+                for ticker in TRAINING_TICKERS:
+                    try:
+                        if artifacts["models_available"]:
+                            pred = predict_single(ticker)
+                            predictions.append({
+                                "ticker": ticker,
+                                "sector": pred["info"].get("sector", "Unknown"),
+                                "beat_probability": pred["beat_probability"],
+                                "confidence": pred["confidence"],
+                                "prediction": pred["prediction"],
+                            })
+                        else:
+                            predictions.append({
+                                "ticker": ticker,
+                                "sector": "Unknown",
+                                "beat_probability": np.random.uniform(0.3, 0.85),
+                                "confidence": "N/A",
+                                "prediction": "DEMO",
+                            })
+                    except Exception:
+                        predictions.append({
+                            "ticker": ticker,
+                            "sector": "Unknown",
+                            "beat_probability": 0.5,
+                            "confidence": "N/A",
+                            "prediction": "ERROR",
+                        })
 
-                    # Format for display
-                    display_df = watchlist.copy()
-                    if "earnings_date" in display_df.columns:
-                        display_df["earnings_date"] = pd.to_datetime(display_df["earnings_date"]).dt.strftime("%Y-%m-%d")
-                    display_df["beat_probability"] = (display_df["beat_probability"] * 100).round(1)
+                if not artifacts["models_available"]:
+                    st.warning("⚠️ Showing demo predictions (models not trained).")
 
-                    # Color coding function
-                    def color_probability(val):
-                        try:
-                            v = float(val)
-                            if v >= 65:
-                                return "background-color: rgba(0, 184, 148, 0.3); color: #00b894;"
-                            elif v >= 45:
-                                return "background-color: rgba(253, 203, 110, 0.3); color: #fdcb6e;"
-                            else:
-                                return "background-color: rgba(225, 112, 85, 0.3); color: #e17055;"
-                        except (ValueError, TypeError):
-                            return ""
+                display_df = pd.DataFrame(predictions)
+                display_df = display_df.sort_values("beat_probability", ascending=False)
+                display_df["beat_probability"] = (display_df["beat_probability"] * 100).round(1)
 
-                    # Rename columns for display
-                    col_map = {
-                        "ticker": "Ticker",
-                        "company_name": "Company",
-                        "earnings_date": "Earnings Date",
-                        "beat_probability": "Beat Prob (%)",
-                        "confidence": "Confidence",
-                        "sector": "Sector",
-                        "prediction": "Prediction",
-                    }
-                    display_cols = [c for c in col_map.keys() if c in display_df.columns]
-                    display_df = display_df[display_cols].rename(columns=col_map)
+                # Color coding function
+                def color_probability(val):
+                    try:
+                        v = float(val)
+                        if v >= 65:
+                            return "background-color: rgba(0, 184, 148, 0.3); color: #00b894;"
+                        elif v >= 45:
+                            return "background-color: rgba(253, 203, 110, 0.3); color: #fdcb6e;"
+                        else:
+                            return "background-color: rgba(225, 112, 85, 0.3); color: #e17055;"
+                    except (ValueError, TypeError):
+                        return ""
 
-                    styled = display_df.style.applymap(
-                        color_probability,
-                        subset=["Beat Prob (%)"] if "Beat Prob (%)" in display_df.columns else [],
-                    )
-                    st.dataframe(styled, use_container_width=True, hide_index=True)
+                col_map = {
+                    "ticker": "Ticker",
+                    "sector": "Sector",
+                    "beat_probability": "Beat Prob (%)",
+                    "confidence": "Confidence",
+                    "prediction": "Prediction",
+                }
+                display_df = display_df.rename(columns=col_map)
 
-                    # Download button
-                    csv = display_df.to_csv(index=False)
-                    st.download_button(
-                        "📥 Download Watchlist CSV",
-                        csv,
-                        file_name=f"earnings_watchlist_{datetime.now().strftime('%Y%m%d')}.csv",
-                        mime="text/csv",
-                    )
+                styled = display_df.style.applymap(
+                    color_probability,
+                    subset=["Beat Prob (%)"],
+                )
+                st.dataframe(styled, use_container_width=True, hide_index=True)
+
+                # Download button
+                csv = display_df.to_csv(index=False)
+                st.download_button(
+                    "📥 Download Watchlist CSV",
+                    csv,
+                    file_name=f"earnings_watchlist_{datetime.now().strftime('%Y%m%d')}.csv",
+                    mime="text/csv",
+                )
 
             except Exception as exc:
-                st.error(f"Failed to load watchlist: {exc}")
+                st.error(f"Failed to generate predictions: {exc}")
     else:
-        st.info("Click the button above to load the upcoming earnings watchlist.")
+        st.info("Click the button above to generate predictions for the 15-stock training universe.")
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -446,6 +457,26 @@ with tab3:
         with m_cols[i]:
             display_val = f"{value:.4f}" if isinstance(value, (int, float)) else str(value)
             st.metric(label, display_val, help=help_text if help_text else None)
+
+    # ── Baseline comparison row ──
+    baseline_cols = st.columns(3)
+    naive_baseline = metrics.get("naive_baseline")
+    improvement = metrics.get("improvement_over_baseline")
+    cal_pred = metrics.get("calibration_mean_predicted")
+    cal_actual = metrics.get("calibration_mean_actual")
+    with baseline_cols[0]:
+        if naive_baseline is not None:
+            st.metric("Naive Baseline", f"{naive_baseline:.4f}",
+                      help="Accuracy of always predicting the majority class")
+    with baseline_cols[1]:
+        if improvement is not None:
+            st.metric("Improvement", f"+{improvement:.4f}",
+                      help="Model accuracy minus naive baseline")
+    with baseline_cols[2]:
+        if cal_pred is not None and cal_actual is not None:
+            st.metric("Calibration",
+                      f"pred={cal_pred:.3f} / actual={cal_actual:.3f}",
+                      help="Mean predicted vs mean actual probability")
 
     st.markdown("---")
 
@@ -574,9 +605,9 @@ with tab4:
     ## 📖 Methodology
 
     ### Overview
-    EarningsPulse uses a **dual-model ensemble** (XGBoost + LightGBM) trained on 
-    3 years of quarterly earnings data from 50 S&P 500 companies representing 
-    all 11 GICS sectors.
+    EarningsPulse uses a **dual-model ensemble** (XGBoost + LightGBM) trained on
+    ~10 years of quarterly earnings data from **15 S&P 500 companies** across
+    multiple GICS sectors.
 
     The system predicts whether a company will **beat** or **miss** Wall Street's
     EPS (Earnings Per Share) consensus estimate before the earnings announcement.
@@ -586,81 +617,70 @@ with tab4:
     ### Data Sources
     | Source | Data | Cost |
     |--------|------|------|
-    | **yfinance** | Price history, earnings actuals/estimates, fundamentals, insider data | Free |
-    | **Alpha Vantage** | Fallback earnings estimates, company overview (25 calls/day) | Free tier |
-    | **SEC EDGAR** | 8-K filing detection around earnings dates | Free |
-    | **Yahoo Finance** | VIX, treasury yields, sector ETF prices | Free (via yfinance) |
+    | **Alpha Vantage EARNINGS** | Quarterly reportedEPS vs. estimatedEPS | Free (25/day) |
+    | **Alpha Vantage MONTHLY** | Monthly adjusted close prices for momentum | Free (25/day) |
+    | **FRED VIXCLS** | VIX (market fear gauge) | Free, no key |
+    | **FRED T10Y2Y** | 10Y–2Y Treasury yield spread | Free, no key |
 
     ---
 
-    ### Feature Engineering (20 Features)
-    
-    **Group A — Analyst Estimates:**
-    - EPS surprise in the prior quarter
-    - Consecutive beat streak (0–8 quarters)
-    - Analyst revision direction (upward vs. downward)
-    - Estimate dispersion (spread of analyst opinions)
+    ### Feature Engineering (12 Features, All Look-Ahead Safe)
 
-    **Group B — Price Momentum (Look-Ahead Safe):**
-    - 1-week, 1-month, and 3-month returns *prior* to earnings
-    - Price relative to 52-week high
-    - Volume surge (short-term vs. long-term average)
+    **Earnings History (derived from past quarters):**
+    - Consecutive beat streak going into this quarter
+    - Last quarter's EPS surprise % (lagged — knowable before announcement)
+    - Beat/miss indicator last quarter and two quarters ago
+    - Year-over-year EPS growth (same quarter vs. prior year)
+    - Surprise acceleration (trend in surprise magnitude)
+    - Rolling 4-quarter beat consistency rate
+    - Typical surprise magnitude for this company
 
-    **Group C — Fundamental Quality:**
-    - Year-over-year revenue growth
-    - Gross margin trend (quarter-over-quarter change)
-    - Free cash flow yield (FCF / market cap)
-    - Debt-to-equity ratio
+    **Price Momentum (from AV MONTHLY, date-matched):**
+    - 1-month and 3-month price returns before earnings
 
-    **Group D — Sentiment & Insider Activity:**
-    - Insider buy/sell ratio (last 90 days)
-    - Institutional ownership level
-    - Short interest ratio
-    - Recent 8-K filing indicator
-
-    **Group E — Macro Context:**
-    - Yield curve spread (10Y minus 2Y treasury)
-    - VIX level (market fear gauge)
-    - Sector-specific momentum (SPDR sector ETF returns)
+    **Macro Context (from FRED, free):**
+    - CBOE VIX level (market fear) at earnings date
+    - 10Y–2Y yield curve spread at earnings date
 
     ---
 
-    ### Why TimeSeriesSplit?
-    Financial data is **sequential**: using random train/test splits would allow 
-    the model to "cheat" by learning from future data. `TimeSeriesSplit` ensures 
-    that each fold only trains on past data and validates on future data, just 
-    like real-world prediction.
+    ### Why GroupShuffleSplit?
+    Each CV fold **holds out ALL quarters of 2–3 tickers completely**. The model
+    never sees any data from the held-out companies during training, testing
+    true generalisation to unseen stocks. This is the correct methodology for
+    financial ML — unlike random or time-based splits that allow per-company
+    memorisation.
 
     ### Why Ensemble?
-    XGBoost and LightGBM use different splitting algorithms and regularization 
-    strategies. Averaging their probabilities reduces variance and produces 
-    better-calibrated predictions than either model alone.
+    XGBoost and LightGBM use different splitting algorithms and regularisation
+    strategies. Averaging their probabilities reduces variance and produces
+    better-calibrated predictions.
 
     ### Look-Ahead Bias Prevention
-    All price-based features are computed as of **earnings_date minus 2 days**
-    to prevent any post-announcement data from leaking into the features.
+    - **No OVERVIEW fundamentals**: AV OVERVIEW returns *current-day* PE ratio,
+      margins, etc. — using these for historical rows is look-ahead leakage.
+    - **All features derived from history**: Every feature uses only data
+      available *before* the earnings announcement.
+    - **Price cut-off**: Monthly prices are matched to 5 days before quarter-end
+      to prevent post-announcement contamination.
 
     ---
 
     ### Limitations
-    - **API Rate Limits**: yfinance is rate-limited; bulk data fetches may take 
-      several minutes. Alpha Vantage is limited to 25 calls/day on the free tier.
-    - **Training Window**: 3 years of quarterly data (≈12 quarters per stock). 
-      This captures recent regimes but may miss longer cycles.
-    - **Feature Coverage**: Not all features are available for every stock/quarter 
-      (handled via median imputation). Stocks with sparse data may have less 
-      reliable predictions.
-    - **Market Regime Shifts**: Models trained on recent data may underperform 
+    - **Alpha Vantage Rate Limits**: Free tier allows 25 calls/day.
+      Initial dataset build requires ~30 calls (may need 2 days).
+    - **Training Universe**: 15 of 500 S&P stocks. Predictions for unseen
+      companies rely on learned cross-company patterns.
+    - **Price Granularity**: Monthly closes only (no daily/weekly) on free tier.
+    - **Market Regime Shifts**: Models trained on recent data may underperform
       during unprecedented events (COVID, rate shocks, etc.).
-    - **Universe Size**: Trained on 50 of 500 S&P stocks. Predictions for 
-      out-of-universe stocks are less reliable.
 
     ---
 
     ### ⚠️ Disclaimer
-    > **This tool is for educational and research purposes only.** It is NOT 
-    > financial advice. Do not make investment decisions based solely on these 
-    > predictions. Past performance does not guarantee future results. Always 
+    > **This tool is for educational and research purposes only.** It is NOT
+    > financial advice. Do not make investment decisions based solely on these
+    > predictions. Past performance does not guarantee future results. Always
     > do your own due diligence and consult a qualified financial advisor.
     """)
 

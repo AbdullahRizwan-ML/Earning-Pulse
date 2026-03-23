@@ -12,11 +12,8 @@ from typing import Any, Dict, List, Optional, Tuple
 import numpy as np
 import pandas as pd
 
-from src.feature_engineering import (
-    FEATURE_COLUMNS,
-    build_single_ticker_features,
-    handle_missing_data,
-)
+from src.data_loader import FEATURE_COLUMNS, FEATURE_REGISTRY
+from src.live_fetch import fetch_live_features
 from src.model import load_models
 from src.utils import DATA_DIR, SECTOR_MAP, setup_logger
 
@@ -34,8 +31,8 @@ def predict_single(
 ) -> Dict[str, Any]:
     """Generate a beat/miss probability prediction for a single stock.
 
-    Fetches live features, runs them through both models, and returns
-    the ensemble probability along with a feature breakdown.
+    Fetches live features via Alpha Vantage, runs them through both models,
+    and returns the ensemble probability along with a feature breakdown.
 
     Args:
         ticker: Stock ticker symbol (e.g., ``"AAPL"``).
@@ -52,7 +49,7 @@ def predict_single(
         - ``features``: Dict of feature name → value.
         - ``feature_impacts``: Dict of feature name → impact direction.
         - ``earnings_history``: Recent earnings history DataFrame.
-        - ``info``: Additional info (P/E, sector, etc.).
+        - ``info``: Additional info (sector, etc.).
     """
     result: Dict[str, Any] = {
         "ticker": ticker.upper(),
@@ -72,19 +69,21 @@ def predict_single(
             xgb_model, lgbm_model, _, feature_names = load_models()
 
         if not feature_names:
-            feature_names = FEATURE_COLUMNS + ["prev_surprise"]
+            feature_names = FEATURE_COLUMNS
 
-        # Build features
-        raw_features = build_single_ticker_features(ticker)
+        # Fetch live features
+        live_data = fetch_live_features(ticker)
+        raw_features = live_data.get("features", {})
 
-        # Extract earnings history before converting to model input
-        earnings_hist = raw_features.pop("earnings_history", pd.DataFrame())
-        result["earnings_history"] = earnings_hist
+        # Extract earnings history
+        hist_rows = live_data.get("earnings_history", [])
+        if hist_rows:
+            result["earnings_history"] = pd.DataFrame(hist_rows)
 
         # Build feature vector in correct order
         feature_vector = {}
         for fname in feature_names:
-            val = raw_features.get(fname, None)
+            val = raw_features.get(fname, 0.0)
             if val is None or (isinstance(val, float) and np.isnan(val)):
                 feature_vector[fname] = 0.0
             else:
@@ -96,6 +95,17 @@ def predict_single(
         X = pd.DataFrame([feature_vector])
         X = X[feature_names]  # Ensure correct column order
         X = X.apply(pd.to_numeric, errors="coerce").fillna(0)
+
+        # Apply same scaling used during training
+        scaler_path = DATA_DIR / "feature_scaler.joblib"
+        if scaler_path.exists():
+            import joblib as _joblib
+            scaler = _joblib.load(scaler_path)
+            X = pd.DataFrame(
+                scaler.transform(X),
+                columns=X.columns,
+                index=X.index,
+            )
 
         # Predict with both models
         xgb_proba = float(xgb_model.predict_proba(X)[:, 1][0])
@@ -123,7 +133,7 @@ def predict_single(
 
         # Additional info
         result["info"] = {
-            "sector": SECTOR_MAP.get(ticker.upper(), "Unknown"),
+            "sector": live_data.get("sector", SECTOR_MAP.get(ticker.upper(), "Unknown")),
             "model_agreement": "Yes" if (xgb_proba >= 0.5) == (lgbm_proba >= 0.5) else "No",
         }
 
@@ -137,6 +147,9 @@ def predict_single(
     except FileNotFoundError:
         result["error"] = "Models not trained yet. Run 'python -m src.model' first."
         log.error(result["error"])
+    except ValueError as exc:
+        result["error"] = str(exc)
+        log.error("Prediction failed for %s: %s", ticker, exc)
     except Exception as exc:
         result["error"] = f"Prediction failed: {str(exc)}"
         log.error("Prediction failed for %s: %s", ticker, exc)
@@ -153,8 +166,7 @@ def predict_watchlist(
     """Generate beat probabilities for all stocks in the upcoming earnings list.
 
     Args:
-        upcoming_df: DataFrame with at least a ``ticker`` column from
-            ``get_upcoming_earnings()``.
+        upcoming_df: DataFrame with at least a ``ticker`` column.
 
     Returns:
         The input DataFrame augmented with ``beat_probability``,
@@ -247,16 +259,15 @@ def _compute_feature_impacts(
 
     # Features where higher = more likely to beat
     bullish_when_high = {
-        "eps_surprise_last_q", "eps_beat_streak", "eps_revision_direction",
-        "ret_1m", "ret_3m", "ret_1w", "price_vs_52w_high",
-        "revenue_growth_yoy", "gross_margin_trend", "fcf_yield",
-        "insider_buy_sell_ratio", "sector_momentum", "prev_surprise",
+        "eps_surprise_pct", "eps_beat_streak",
+        "price_ret_1m", "price_ret_3m", "price_ret_1w",
+        "price_vs_52w_high", "revenue_growth_yoy", "gross_margin",
+        "sector_momentum",
     }
 
     # Features where higher = more likely to miss
     bearish_when_high = {
-        "estimate_dispersion", "volume_surge", "debt_to_equity",
-        "short_interest_ratio", "vix_level",
+        "volume_surge", "debt_to_equity", "short_ratio", "vix_level",
     }
 
     for fname in feature_names:

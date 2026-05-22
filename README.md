@@ -9,16 +9,75 @@
   <img src="https://img.shields.io/badge/Built%20with-XGBoost-orange?logo=xgboost" alt="XGBoost">
   <img src="https://img.shields.io/badge/Built%20with-LightGBM-brightgreen" alt="LightGBM">
   <img src="https://img.shields.io/badge/UI-Streamlit-red?logo=streamlit" alt="Streamlit">
-  <img src="https://img.shields.io/badge/Data-yfinance-yellow" alt="yfinance">
+  <img src="https://img.shields.io/badge/Data-Alpha%20Vantage%20%2B%20FRED-yellow" alt="Data">
 </p>
 
 ---
 
 ## Overview
 
-**EarningsPulse** is a machine learning system that predicts whether a company will **beat** or **miss** Wall Street's EPS consensus estimates before the earnings announcement. It uses 20 engineered features spanning analyst estimates, price momentum, fundamental quality, insider sentiment, and macroeconomic context.
+**EarningsPulse** is a machine learning system that predicts whether an S&P 500 company will **beat** or **miss** Wall Street's EPS consensus estimate before the earnings announcement. An ensemble of XGBoost + LightGBM is trained on 1,600 quarterly earnings records from 15 tickers, using 12 look-ahead-safe features derived from earnings history, price momentum, and macro context. Cross-validation uses **GroupShuffleSplit** (full ticker holdout) so each fold tests the model on companies it has *never* seen during training — producing honest, generalizable AUC scores.
 
-The ensemble model (XGBoost + LightGBM) is trained on 3 years of quarterly earnings from 50 S&P 500 companies across all 11 GICS sectors, with **TimeSeriesSplit** cross-validation to prevent data leakage.
+---
+
+## Model Performance
+
+| Metric | Value |
+|--------|-------|
+| CV AUC (GroupShuffleSplit) | **0.74** |
+| CV Accuracy | **0.73** |
+| CV F1 (weighted) | **0.72** |
+| Naive baseline (majority class) | 0.70 |
+| Training samples | 1,600 |
+| Companies trained on | 15 S&P 500 tickers |
+| Evaluation method | GroupShuffleSplit — full ticker holdout |
+| CV folds | 5 |
+
+> **CV AUC 0.74 vs naive 0.70**: The model beats the majority-class baseline by ~4 percentage points on companies it has never seen during training. On the final held-out fold the ensemble achieves ROC-AUC > 0.99 (it overfits to the full-data final model), so the cross-validation figure is the honest estimate.
+
+---
+
+## Features (12, all look-ahead safe)
+
+| # | Feature | Description | Data Source |
+|---|---------|-------------|-------------|
+| 1 | `eps_beat_streak` | Consecutive quarters beating estimates (capped at 8) | Alpha Vantage EARNINGS |
+| 2 | `eps_surprise_last_q` | Prior quarter EPS surprise % — lagged, no leakage | Alpha Vantage EARNINGS |
+| 3 | `beat_last_q` | Beat estimate last quarter (1/0) | Alpha Vantage EARNINGS |
+| 4 | `beat_2q_ago` | Beat estimate two quarters ago (1/0) | Alpha Vantage EARNINGS |
+| 5 | `eps_growth_yoy` | Year-over-year EPS growth (same quarter vs prior year) | Alpha Vantage EARNINGS |
+| 6 | `eps_acceleration` | Surprise trend: last-Q surprise minus 2Q-ago surprise | Alpha Vantage EARNINGS |
+| 7 | `eps_consistency` | Rolling 4-quarter beat rate (0–1) | Alpha Vantage EARNINGS |
+| 8 | `eps_magnitude_trend` | Mean absolute surprise % over last 4 quarters | Alpha Vantage EARNINGS |
+| 9 | `price_ret_1m` | 1-month price return before quarter-end (5-day cutoff) | Alpha Vantage MONTHLY |
+| 10 | `price_ret_3m` | 3-month price return before quarter-end (5-day cutoff) | Alpha Vantage MONTHLY |
+| 11 | `vix_level` | CBOE VIX at earnings date (market fear gauge) | FRED VIXCLS |
+| 12 | `yield_spread` | 10Y–2Y Treasury yield spread at earnings date | FRED T10Y2Y |
+
+All price features use a 5-day pre-quarter cutoff to prevent post-announcement contamination.
+
+---
+
+## Quickstart
+
+```bash
+git clone https://github.com/yourusername/earningspulse.git
+cd earningspulse
+python -m venv venv && venv\Scripts\activate    # Windows
+pip install -r requirements.txt
+cp .env.example .env   # add your Alpha Vantage key
+python -m src.model    # trains on cached CSV (~30 seconds)
+streamlit run app.py
+```
+
+Open `http://localhost:8501` to access the EarningsPulse dashboard.
+
+```bash
+# Run tests
+python -m pytest tests/ -v
+```
+
+> **Note:** The CSV (`data/earnings_dataset.csv`) is pre-built and committed. Running `python -m src.model` reads from it and retrains the models in ~30 seconds without any API calls. To rebuild the CSV from scratch you need a free Alpha Vantage key.
 
 ---
 
@@ -27,186 +86,116 @@ The ensemble model (XGBoost + LightGBM) is trained on 3 years of quarterly earni
 ```
 ┌──────────────────────────────────────────────────────────────────────┐
 │                        DATA SOURCES                                  │
-│  yfinance │ Alpha Vantage (fallback) │ SEC EDGAR │ Yahoo Finance    │
+│  Alpha Vantage (EARNINGS + MONTHLY_ADJUSTED) │ FRED (VIXCLS, T10Y2Y)│
 └─────────────────────────┬────────────────────────────────────────────┘
                           │
                           ▼
 ┌──────────────────────────────────────────────────────────────────────┐
-│                     DATA INGESTION (src/data_ingestion.py)           │
-│  Earnings History │ Price Data │ Fundamentals │ Sentiment │ Macro   │
-│  • Retry logic (3x with backoff)                                    │
-│  • Parquet caching with TTL                                         │
-│  • Rate limiting (0.5s between requests)                            │
+│              DATA LOADER  (src/data_loader.py)                       │
+│  Loads pre-built CSV or builds from API with local caching           │
+│  12 look-ahead-safe features │ schema versioning │ median imputation │
 └─────────────────────────┬────────────────────────────────────────────┘
                           │
                           ▼
 ┌──────────────────────────────────────────────────────────────────────┐
-│                 FEATURE ENGINEERING (src/feature_engineering.py)      │
-│  20 Features across 5 groups:                                        │
-│  A: Analyst Estimates │ B: Price Momentum │ C: Fundamentals          │
-│  D: Sentiment/Insider │ E: Macro Context                             │
-│  • Median imputation for missing data                                │
-│  • Lag features (prior quarter surprise)                             │
-│  • FEATURE_REGISTRY for UI descriptions                              │
+│                     MODEL TRAINING  (src/model.py)                   │
+│  XGBoost  ──┐                                                        │
+│             ├── Ensemble (average probabilities)                     │
+│  LightGBM ──┘                                                        │
+│  • GroupShuffleSplit(5) — full ticker holdout CV                     │
+│  • RobustScaler │ feature importance │ model persistence             │
 └─────────────────────────┬────────────────────────────────────────────┘
                           │
                           ▼
 ┌──────────────────────────────────────────────────────────────────────┐
-│                     MODEL TRAINING (src/model.py)                    │
-│  XGBoost   ──┐                                                       │
-│              ├── Ensemble (average probabilities)                    │
-│  LightGBM  ──┘                                                       │
-│  • TimeSeriesSplit(5) cross-validation                               │
-│  • Early stopping │ Feature importance │ Model persistence           │
+│              LIVE INFERENCE  (src/predict.py + src/live_fetch.py)    │
+│  Fetches live features for any ticker │ median imputation fallback   │
 └─────────────────────────┬────────────────────────────────────────────┘
                           │
                           ▼
 ┌──────────────────────────────────────────────────────────────────────┐
-│                   STREAMLIT DASHBOARD (app.py)                       │
+│                   STREAMLIT DASHBOARD  (app.py)                      │
 │  Tab 1: Predict a Stock │ Tab 2: Earnings Watchlist                  │
 │  Tab 3: Model Performance │ Tab 4: Methodology                      │
-│  • Plotly charts │ Dark theme │ CSV export │ Live data               │
+│  • Plotly charts │ dark theme │ CSV export                           │
 └──────────────────────────────────────────────────────────────────────┘
 ```
 
 ---
 
-## Quickstart
+## Data Sources
 
-### 1. Clone and install
+| Source | Endpoint | Used For |
+|--------|----------|----------|
+| **Alpha Vantage** | `EARNINGS` | Quarterly reported vs estimated EPS per ticker |
+| **Alpha Vantage** | `TIME_SERIES_MONTHLY_ADJUSTED` | Monthly adjusted close prices for momentum features |
+| **FRED** | `VIXCLS` | CBOE VIX daily closes (free, no key) |
+| **FRED** | `T10Y2Y` | 10Y–2Y Treasury yield spread (free, no key) |
 
-```bash
-git clone https://github.com/yourusername/earnings-predictor.git
-cd earnings-predictor
-pip install -r requirements.txt
-```
-
-### 2. Configure API keys (optional)
-
-```bash
-cp .env.example .env
-# Edit .env with your Alpha Vantage and SEC API keys
-# All keys are optional — the system works with yfinance alone
-```
-
-### 3. Train the model
-
-```bash
-python -m src.model
-```
-
-This fetches 3 years of earnings data for 50 S&P 500 tickers, engineers all 20 features, trains the XGBoost + LightGBM ensemble, and saves the models to `data/`.
-
-### 4. Launch the dashboard
-
-```bash
-streamlit run app.py
-```
-
-Open `http://localhost:8501` to access the EarningsPulse dashboard.
-
-### 5. Run tests
-
-```bash
-pytest tests/ -v
-```
-
----
-
-## Features (20 total)
-
-| # | Feature | Group | Description | Source |
-|---|---------|-------|-------------|--------|
-| 1 | `eps_surprise_last_q` | Analyst | EPS surprise magnitude in prior quarter | yfinance |
-| 2 | `eps_beat_streak` | Analyst | Consecutive quarters of beating estimates (0–8) | yfinance |
-| 3 | `eps_revision_direction` | Analyst | Analyst estimate revision trend | yfinance |
-| 4 | `estimate_dispersion` | Analyst | Spread of analyst price targets | yfinance |
-| 5 | `ret_1w` | Momentum | 1-week return prior to earnings | yfinance |
-| 6 | `ret_1m` | Momentum | 1-month return prior to earnings | yfinance |
-| 7 | `ret_3m` | Momentum | 3-month return prior to earnings | yfinance |
-| 8 | `price_vs_52w_high` | Momentum | Price as ratio of 52-week high | yfinance |
-| 9 | `volume_surge` | Momentum | 5-day / 30-day avg volume ratio | yfinance |
-| 10 | `revenue_growth_yoy` | Fundamental | Year-over-year revenue growth | yfinance |
-| 11 | `gross_margin_trend` | Fundamental | QoQ gross margin change | yfinance |
-| 12 | `fcf_yield` | Fundamental | Free cash flow / market cap | yfinance |
-| 13 | `debt_to_equity` | Fundamental | Balance sheet leverage ratio | yfinance |
-| 14 | `insider_buy_sell_ratio` | Sentiment | Net insider purchase ratio (90 days) | yfinance |
-| 15 | `institutional_ownership_change` | Sentiment | Institutional ownership level | yfinance |
-| 16 | `short_interest_ratio` | Sentiment | Days to cover short interest | yfinance |
-| 17 | `recent_8k_filing` | Sentiment | 8-K filed in last 7 days | SEC EDGAR |
-| 18 | `yield_curve_spread` | Macro | 10Y–2Y treasury spread | yfinance |
-| 19 | `vix_level` | Macro | VIX volatility index | yfinance |
-| 20 | `sector_momentum` | Macro | SPDR sector ETF 1-month return | yfinance |
-
----
-
-## Model Performance
-
-| Metric | Value |
-|--------|-------|
-| ROC-AUC | *train to see* |
-| Accuracy | *train to see* |
-| Brier Score | *train to see* |
-| F1 (Beat) | *train to see* |
-| F1 (Miss) | *train to see* |
-| Avg CV AUC | *train to see* |
-
-> Run `python -m src.model` to populate these metrics. View them in the Model Performance tab of the dashboard.
-
----
-
-## Screenshots
-
-*Launch the dashboard with `streamlit run app.py` to see the full UI.*
+Alpha Vantage free tier: 25 calls/day. The builder uses a 12-second delay between calls and caches all responses in `data/cache/` so repeated runs are instant.
 
 ---
 
 ## Methodology
 
-### Why TimeSeriesSplit?
-Financial data is inherently sequential. Using random train/test splits would allow the model to learn from future earnings results, creating an unrealistically optimistic evaluation. `TimeSeriesSplit` ensures each fold only trains on historical data and validates on subsequent periods, mimicking real-world prediction conditions.
+### Why GroupShuffleSplit instead of TimeSeriesSplit?
+
+With only 15 tickers, each with ~107 quarters, a time-based split would still train and validate on the *same companies* — just at different time periods. This leaks company-specific patterns (management style, sector dynamics, analyst coverage) into validation, producing artificially optimistic AUC scores.
+
+**GroupShuffleSplit** holds out **3 complete companies** per fold. The model never sees any quarter from those companies during training, testing true generalization to unseen firms. This is the correct methodology for financial ML on a small, heterogeneous universe.
 
 ### Why Ensemble?
-XGBoost and LightGBM employ different tree-building algorithms (histogram vs. exact greedy) and regularization strategies. Averaging their predicted probabilities reduces model variance and produces better-calibrated predictions than either model alone.
+
+XGBoost and LightGBM use different tree-building algorithms (exact greedy vs histogram) and regularization strategies. Averaging their predicted probabilities reduces variance and produces better-calibrated predictions than either alone.
 
 ### Look-Ahead Bias Prevention
-All price-based features (returns, volume, 52-week high ratio) are computed as of **earnings_date − 2 business days** to ensure no post-announcement price moves contaminate the features. This is validated in the test suite.
 
----
-
-## Limitations
-
-- **API Rate Limits**: yfinance has implicit rate limits; bulk fetches are throttled with 0.5s delays. Alpha Vantage free tier is limited to 25 calls/day.
-- **Training Window**: 3 years of quarterly data (~12 quarters per stock). Captures recent market regimes but may miss longer-term cycles.
-- **Feature Coverage**: Not all features are available for every stock/quarter. Handled via median imputation — stocks with sparse data yield less reliable predictions.
-- **Universe Size**: Trained on 50 of ~500 S&P constituents. Out-of-universe predictions should be treated with lower confidence.
-- **Market Regime Shifts**: The model may underperform during unprecedented events (pandemics, rate shocks, geopolitical crises).
+- **EPS features**: All use lagged values (prior quarter's surprise, streak up to quarter *i−1*). Current-quarter data is the target, never a feature.
+- **Price features**: Computed from monthly closes on or before `quarter_end − 5 days`. This avoids any post-announcement price moves.
+- **Macro features**: FRED daily series, looked up at the closest date ≤ `quarter_end`.
 
 ---
 
 ## Project Structure
 
 ```
-earnings_predictor/
-├── app.py                          # Streamlit dashboard
-├── requirements.txt                # Pinned dependencies
-├── .env.example                    # API key template
-├── README.md                       # This file
+earningspulse/
+├── app.py                      # Streamlit dashboard
+├── requirements.txt            # Pinned dependencies
+├── .env.example                # API key template
+├── README.md                   # This file
 ├── data/
-│   └── .gitkeep
+│   ├── earnings_dataset.csv    # Pre-built training dataset (1,600 rows)
+│   ├── xgb_model.joblib        # Trained XGBoost model
+│   ├── lgbm_model.joblib       # Trained LightGBM model
+│   ├── feature_scaler.joblib   # RobustScaler fitted on training data
+│   ├── feature_medians.json    # Median values for live imputation
+│   ├── feature_importance.json # Feature importance rankings
+│   ├── model_metrics.json      # CV metrics and evaluation results
+│   └── schema_version.txt      # Dataset schema version (v3)
 ├── src/
-│   ├── __init__.py                 # Package init
-│   ├── __main__.py                 # python -m src.model entry point
-│   ├── utils.py                    # Logging, caching, constants
-│   ├── data_ingestion.py           # All data fetching logic
-│   ├── feature_engineering.py      # Feature construction & registry
-│   ├── model.py                    # Training, evaluation, persistence
-│   └── predict.py                  # Inference pipeline
+│   ├── __init__.py
+│   ├── __main__.py             # python -m src.model entry point
+│   ├── utils.py                # Logging, paths, constants
+│   ├── data_loader.py          # CSV loader, feature constants, FRED fetcher
+│   ├── live_fetch.py           # Live feature fetching for inference
+│   ├── model.py                # Training, evaluation, persistence
+│   └── predict.py              # Inference pipeline
 └── tests/
     ├── __init__.py
-    ├── test_features.py            # Feature engineering tests
-    └── test_model.py               # Model pipeline tests
+    ├── test_features.py        # Feature engineering tests (39 total)
+    └── test_model.py           # Model pipeline tests
 ```
+
+---
+
+## Limitations
+
+- **Universe size**: Trained on 15 of ~500 S&P 500 constituents. Out-of-universe predictions should be treated with lower confidence.
+- **API rate limits**: Alpha Vantage free tier is 25 calls/day. The builder caches aggressively to minimize calls.
+- **Training window**: ~107 quarters per ticker (1996–2024). Captures multiple market cycles but may miss very long-term regime shifts.
+- **No fundamental features**: Revenue growth, margins, and debt ratios were deliberately excluded — they are reported *after* the earnings call and cannot be known before the announcement without look-ahead leakage.
+- **Market regime shifts**: The model may underperform during unprecedented events (pandemics, rate shocks, geopolitical crises).
 
 ---
 

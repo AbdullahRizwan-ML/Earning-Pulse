@@ -1,9 +1,11 @@
 """
 Unit tests for the model training, evaluation, and persistence pipeline.
 
-Tests cover prediction output format, time-series split correctness,
+Tests cover prediction output format, GroupShuffleSplit correctness,
 ensemble averaging, model save/load roundtrip, and feature importance
 normalization.
+
+NOTE: FEATURE_COLUMNS lives in src.data_loader (not src.feature_engineering).
 """
 
 import json
@@ -15,7 +17,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from src.feature_engineering import FEATURE_COLUMNS
+from src.data_loader import FEATURE_COLUMNS
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -36,8 +38,6 @@ def synthetic_training_data() -> Tuple[pd.DataFrame, pd.Series]:
         np.random.randn(n_samples, n_features),
         columns=FEATURE_COLUMNS,
     )
-    # Add prev_surprise as additional feature
-    X["prev_surprise"] = np.random.randn(n_samples) * 0.05
 
     # Create target with some signal from first few features
     signal = X.iloc[:, 0] * 0.3 + X.iloc[:, 1] * 0.2 + np.random.randn(n_samples) * 0.5
@@ -47,7 +47,9 @@ def synthetic_training_data() -> Tuple[pd.DataFrame, pd.Series]:
 
 
 @pytest.fixture
-def trained_models(synthetic_training_data: Tuple[pd.DataFrame, pd.Series]) -> Tuple[Any, Any, List[str]]:
+def trained_models(
+    synthetic_training_data: Tuple[pd.DataFrame, pd.Series],
+) -> Tuple[Any, Any, List[str]]:
     """Train models on synthetic data for testing.
 
     Returns:
@@ -128,52 +130,70 @@ class TestModelOutputProbability:
         assert proba.shape == (len(X), 2), f"Expected shape ({len(X)}, 2), got {proba.shape}"
 
 
-class TestTimeSeriesSplit:
-    """Tests for time-series aware cross-validation."""
+class TestGroupShuffleSplit:
+    """Tests for GroupShuffleSplit cross-validation (ticker-level holdout).
 
-    def test_no_future_data_in_train(
+    The project uses GroupShuffleSplit so each fold holds out ALL quarters
+    of 2-3 complete tickers — the model never sees those companies during
+    training for that fold.
+    """
+
+    def test_no_group_overlap_between_train_and_val(
         self,
         synthetic_training_data: Tuple[pd.DataFrame, pd.Series],
     ) -> None:
-        """Assert that no future indices appear in training folds."""
-        from sklearn.model_selection import TimeSeriesSplit
+        """Assert no ticker appears in both train and validation folds."""
+        from sklearn.model_selection import GroupShuffleSplit
 
-        X, _ = synthetic_training_data
-        tscv = TimeSeriesSplit(n_splits=5)
+        X, y = synthetic_training_data
+        n_samples = len(X)
+        # Simulate 5 tickers with equal samples
+        tickers = ["T" + str(i) for i in range(5)]
+        groups = pd.Series(
+            [tickers[i % 5] for i in range(n_samples)], name="ticker"
+        )
 
-        for train_idx, val_idx in tscv.split(X):
-            max_train = max(train_idx)
-            min_val = min(val_idx)
-            assert max_train < min_val, (
-                f"Data leak detected: train max idx {max_train} >= val min idx {min_val}"
+        gss = GroupShuffleSplit(n_splits=5, test_size=0.2, random_state=42)
+        for train_idx, val_idx in gss.split(X, y, groups):
+            train_tickers = set(groups.iloc[train_idx])
+            val_tickers = set(groups.iloc[val_idx])
+            overlap = train_tickers & val_tickers
+            assert len(overlap) == 0, (
+                f"Ticker overlap between train and val: {overlap}"
             )
 
-    def test_increasing_train_size(
+    def test_validation_never_overlaps_train_indices(
         self,
         synthetic_training_data: Tuple[pd.DataFrame, pd.Series],
     ) -> None:
-        """Assert training set grows with each fold."""
-        from sklearn.model_selection import TimeSeriesSplit
+        """Assert train and validation indices never share the same row."""
+        from sklearn.model_selection import GroupShuffleSplit
 
-        X, _ = synthetic_training_data
-        tscv = TimeSeriesSplit(n_splits=5)
-        prev_size = 0
-        for train_idx, _ in tscv.split(X):
-            assert len(train_idx) > prev_size, "Training set did not grow"
-            prev_size = len(train_idx)
+        X, y = synthetic_training_data
+        n_samples = len(X)
+        groups = pd.Series([f"T{i % 5}" for i in range(n_samples)])
 
-    def test_validation_never_overlaps_train(
-        self,
-        synthetic_training_data: Tuple[pd.DataFrame, pd.Series],
-    ) -> None:
-        """Assert train and validation indices never overlap."""
-        from sklearn.model_selection import TimeSeriesSplit
-
-        X, _ = synthetic_training_data
-        tscv = TimeSeriesSplit(n_splits=5)
-        for train_idx, val_idx in tscv.split(X):
+        gss = GroupShuffleSplit(n_splits=5, test_size=0.2, random_state=42)
+        for train_idx, val_idx in gss.split(X, y, groups):
             overlap = set(train_idx) & set(val_idx)
-            assert len(overlap) == 0, f"Overlap detected: {overlap}"
+            assert len(overlap) == 0, f"Index overlap detected: {overlap}"
+
+    def test_cv_method_label_in_metrics(self) -> None:
+        """Assert saved model_metrics.json records GroupShuffleSplit as cv_method."""
+        import json
+        from pathlib import Path
+
+        metrics_path = Path("data/model_metrics.json")
+        if not metrics_path.exists():
+            pytest.skip("model_metrics.json not found — run python -m src.model first")
+
+        with open(metrics_path) as f:
+            metrics = json.load(f)
+
+        cv_method = metrics.get("cv_method", "")
+        assert "GroupShuffleSplit" in cv_method, (
+            f"Expected 'GroupShuffleSplit' in cv_method, got: {cv_method!r}"
+        )
 
 
 class TestEnsembleAverage:
@@ -281,6 +301,20 @@ class TestModelSaveLoad:
         with tempfile.TemporaryDirectory() as tmpdir:
             with pytest.raises(FileNotFoundError, match="Model files not found"):
                 load_models(path=tmpdir)
+
+    def test_load_models_returns_four_values(self) -> None:
+        """Assert load_models() returns a 4-tuple: (xgb, lgbm, metrics, feature_names)."""
+        from src.model import load_models
+
+        result = load_models()
+        assert len(result) == 4, (
+            f"load_models() should return 4 values, got {len(result)}"
+        )
+        xgb_model, lgbm_model, metrics, feature_names = result
+        assert hasattr(xgb_model, "predict_proba")
+        assert hasattr(lgbm_model, "predict_proba")
+        assert isinstance(metrics, dict)
+        assert isinstance(feature_names, list)
 
 
 class TestFeatureImportance:

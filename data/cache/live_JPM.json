@@ -1,0 +1,77 @@
+{
+  "features": {
+    "eps_beat_streak": 0,
+    "eps_surprise_last_q": -3.9419087136929543,
+    "beat_last_q": 0.0,
+    "beat_2q_ago": 1.0,
+    "eps_growth_yoy": -0.03742203742203737,
+    "eps_acceleration": -8.048684894391108,
+    "eps_consistency": 0.75,
+    "eps_magnitude_trend": 7.069473738447739,
+    "price_ret_1m": 0.0015265,
+    "price_ret_3m": 0.020919,
+    "vix_level": 26.78,
+    "yield_spread": 0.51
+  },
+  "ticker": "JPM",
+  "sector": "Financials",
+  "earnings_history": [
+    {
+      "earnings_date": "2025-12-31",
+      "actual_eps": 4.63,
+      "estimated_eps": 4.82,
+      "beat": 0,
+      "surprise_pct": -3.9419087136929543
+    },
+    {
+      "earnings_date": "2025-09-30",
+      "actual_eps": 5.07,
+      "estimated_eps": 4.87,
+      "beat": 1,
+      "surprise_pct": 4.106776180698155
+    },
+    {
+      "earnings_date": "2025-06-30",
+      "actual_eps": 4.96,
+      "estimated_eps": 4.47,
+      "beat": 1,
+      "surprise_pct": 10.961968680089491
+    },
+    {
+      "earnings_date": "2025-03-31",
+      "actual_eps": 5.07,
+      "estimated_eps": 4.64,
+      "beat": 1,
+      "surprise_pct": 9.267241379310358
+    },
+    {
+      "earnings_date": "2024-12-31",
+      "actual_eps": 4.81,
+      "estimated_eps": 4.04,
+      "beat": 1,
+      "surprise_pct": 19.059405940594047
+    },
+    {
+      "earnings_date": "2024-09-30",
+      "actual_eps": 4.37,
+      "estimated_eps": 3.99,
+      "beat": 1,
+      "surprise_pct": 9.52380952380952
+    },
+    {
+      "earnings_date": "2024-06-30",
+      "actual_eps": 6.12,
+      "estimated_eps": 5.09,
+      "beat": 1,
+      "surprise_pct": 20.23575638506877
+    },
+    {
+      "earnings_date": "2024-03-31",
+      "actual_eps": 4.44,
+      "estimated_eps": 4.13,
+      "beat": 1,
+      "surprise_pct": 7.506053268765145
+    }
+  ],
+  "fetched_at": "2026-03-23T18:57:30.038279"
+}

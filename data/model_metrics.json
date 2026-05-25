@@ -1,0 +1,139 @@
+{
+  "roc_auc": 0.9994312364918667,
+  "accuracy": 0.9859943977591037,
+  "precision_beat": 0.9899665551839465,
+  "recall_beat": 0.9932885906040269,
+  "f1_beat": 0.9916247906197655,
+  "precision_miss": 0.9655172413793104,
+  "recall_miss": 0.9491525423728814,
+  "f1_miss": 0.9572649572649573,
+  "brier_score": 0.021000318714492688,
+  "confusion_matrix": [
+    [
+      56,
+      3
+    ],
+    [
+      2,
+      296
+    ]
+  ],
+  "roc_curve": {
+    "fpr": [
+      0.0,
+      0.0,
+      0.0,
+      0.05084745762711865,
+      0.05084745762711865,
+      0.11864406779661017,
+      0.11864406779661017,
+      1.0
+    ],
+    "tpr": [
+      0.0,
+      0.003355704697986577,
+      0.9932885906040269,
+      0.9932885906040269,
+      0.9966442953020134,
+      0.9966442953020134,
+      1.0,
+      1.0
+    ]
+  },
+  "n_test_samples": 357,
+  "fold_metrics": [
+    {
+      "fold": 1,
+      "auc": 0.7373737373737372,
+      "accuracy": 0.7425149700598802,
+      "f1": 0.7343894178855404,
+      "train_size": 1266,
+      "val_size": 334,
+      "val_tickers": [
+        "AAPL",
+        "NVDA",
+        "PG"
+      ]
+    },
+    {
+      "fold": 2,
+      "auc": 0.7493416721527321,
+      "accuracy": 0.7058823529411765,
+      "f1": 0.6918636081270169,
+      "train_size": 1311,
+      "val_size": 289,
+      "val_tickers": [
+        "AAPL",
+        "PFE",
+        "TSLA"
+      ]
+    },
+    {
+      "fold": 3,
+      "auc": 0.7661467755341514,
+      "accuracy": 0.7040816326530612,
+      "f1": 0.6986833667453423,
+      "train_size": 1306,
+      "val_size": 294,
+      "val_tickers": [
+        "AMZN",
+        "JNJ",
+        "TSLA"
+      ]
+    },
+    {
+      "fold": 4,
+      "auc": 0.7263307384809595,
+      "accuracy": 0.6917808219178082,
+      "f1": 0.6684633551264235,
+      "train_size": 1308,
+      "val_size": 292,
+      "val_tickers": [
+        "BAC",
+        "META",
+        "WMT"
+      ]
+    },
+    {
+      "fold": 5,
+      "auc": 0.7349562052098738,
+      "accuracy": 0.7983193277310925,
+      "f1": 0.7969179598952947,
+      "train_size": 1243,
+      "val_size": 357,
+      "val_tickers": [
+        "JNJ",
+        "MSFT",
+        "PFE"
+      ]
+    }
+  ],
+  "avg_cv_auc": 0.7428298257502909,
+  "avg_cv_accuracy": 0.7285158210606036,
+  "avg_cv_f1": 0.7180635415559236,
+  "n_train_samples": 1600,
+  "n_features": 12,
+  "training_date": "2026-03-23T18:42:54.054636",
+  "cv_method": "GroupShuffleSplit (ticker-level holdout)",
+  "naive_baseline": 0.696875,
+  "improvement_over_baseline": 0.28911939775910367,
+  "training_tickers": 15,
+  "training_quarters": "2014-2024",
+  "trained_at": "2026-03-23T18:42:54.054636",
+  "calibration_mean_predicted": 0.5133936207292611,
+  "calibration_mean_actual": 0.4444444444444445,
+  "features_list": [
+    "eps_beat_streak",
+    "eps_surprise_last_q",
+    "beat_last_q",
+    "beat_2q_ago",
+    "eps_growth_yoy",
+    "eps_acceleration",
+    "eps_consistency",
+    "eps_magnitude_trend",
+    "price_ret_1m",
+    "price_ret_3m",
+    "vix_level",
+    "yield_spread"
+  ]
+}

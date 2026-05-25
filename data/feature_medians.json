@@ -1,0 +1,14 @@
+{
+  "eps_beat_streak": 2.0,
+  "eps_surprise_last_q": 3.7037,
+  "beat_last_q": 1.0,
+  "beat_2q_ago": 1.0,
+  "eps_growth_yoy": 0.1,
+  "eps_acceleration": 0.0,
+  "eps_consistency": 0.75,
+  "eps_magnitude_trend": 7.7014499999999995,
+  "price_ret_1m": 0.0015265,
+  "price_ret_3m": 0.020919,
+  "vix_level": 17.75,
+  "yield_spread": 0.795
+}

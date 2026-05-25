@@ -1,0 +1,77 @@
+{
+  "features": {
+    "eps_beat_streak": 12,
+    "eps_surprise_last_q": 7.2243346007604545,
+    "beat_last_q": 1.0,
+    "beat_2q_ago": 1.0,
+    "eps_growth_yoy": 0.31162790697674414,
+    "eps_acceleration": -16.4825619509637,
+    "eps_consistency": 1.0,
+    "eps_magnitude_trend": 19.052919558038695,
+    "price_ret_1m": -0.03385177938181923,
+    "price_ret_3m": -0.03767948396601374,
+    "vix_level": 26.78,
+    "yield_spread": 0.51
+  },
+  "ticker": "GOOGL",
+  "sector": "Technology",
+  "earnings_history": [
+    {
+      "earnings_date": "2025-12-31",
+      "actual_eps": 2.82,
+      "estimated_eps": 2.63,
+      "beat": 1,
+      "surprise_pct": 7.2243346007604545
+    },
+    {
+      "earnings_date": "2025-09-30",
+      "actual_eps": 2.87,
+      "estimated_eps": 2.32,
+      "beat": 1,
+      "surprise_pct": 23.706896551724153
+    },
+    {
+      "earnings_date": "2025-06-30",
+      "actual_eps": 2.31,
+      "estimated_eps": 2.19,
+      "beat": 1,
+      "surprise_pct": 5.479452054794526
+    },
+    {
+      "earnings_date": "2025-03-31",
+      "actual_eps": 2.81,
+      "estimated_eps": 2.01,
+      "beat": 1,
+      "surprise_pct": 39.80099502487564
+    },
+    {
+      "earnings_date": "2024-12-31",
+      "actual_eps": 2.15,
+      "estimated_eps": 2.13,
+      "beat": 1,
+      "surprise_pct": 0.9389671361502356
+    },
+    {
+      "earnings_date": "2024-09-30",
+      "actual_eps": 2.12,
+      "estimated_eps": 1.85,
+      "beat": 1,
+      "surprise_pct": 14.594594594594595
+    },
+    {
+      "earnings_date": "2024-06-30",
+      "actual_eps": 1.89,
+      "estimated_eps": 1.85,
+      "beat": 1,
+      "surprise_pct": 2.162162162162152
+    },
+    {
+      "earnings_date": "2024-03-31",
+      "actual_eps": 1.89,
+      "estimated_eps": 1.51,
+      "beat": 1,
+      "surprise_pct": 25.16556291390728
+    }
+  ],
+  "fetched_at": "2026-03-23T18:57:02.461324"
+}

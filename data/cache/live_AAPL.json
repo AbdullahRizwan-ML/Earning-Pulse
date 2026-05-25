@@ -1,0 +1,77 @@
+{
+  "features": {
+    "eps_beat_streak": 12,
+    "eps_surprise_last_q": 3.6082474226804044,
+    "beat_last_q": 1.0,
+    "beat_2q_ago": 1.0,
+    "eps_growth_yoy": 0.21818181818181812,
+    "eps_acceleration": -2.758793775821466,
+    "eps_consistency": 1.0,
+    "eps_magnitude_trend": 6.071318105672878,
+    "price_ret_1m": 0.12500963666899184,
+    "price_ret_3m": 0.15554309464587118,
+    "vix_level": 17.44,
+    "yield_spread": 0.49
+  },
+  "ticker": "AAPL",
+  "sector": "Technology",
+  "earnings_history": [
+    {
+      "earnings_date": "2026-03-31",
+      "actual_eps": 2.01,
+      "estimated_eps": 1.94,
+      "beat": 1,
+      "surprise_pct": 3.6082474226804044
+    },
+    {
+      "earnings_date": "2025-12-31",
+      "actual_eps": 2.84,
+      "estimated_eps": 2.67,
+      "beat": 1,
+      "surprise_pct": 6.3670411985018704
+    },
+    {
+      "earnings_date": "2025-09-30",
+      "actual_eps": 1.85,
+      "estimated_eps": 1.77,
+      "beat": 1,
+      "surprise_pct": 4.51977401129944
+    },
+    {
+      "earnings_date": "2025-06-30",
+      "actual_eps": 1.57,
+      "estimated_eps": 1.43,
+      "beat": 1,
+      "surprise_pct": 9.790209790209799
+    },
+    {
+      "earnings_date": "2025-03-31",
+      "actual_eps": 1.65,
+      "estimated_eps": 1.62,
+      "beat": 1,
+      "surprise_pct": 1.8518518518518396
+    },
+    {
+      "earnings_date": "2024-12-31",
+      "actual_eps": 2.4,
+      "estimated_eps": 2.34,
+      "beat": 1,
+      "surprise_pct": 2.5641025641025665
+    },
+    {
+      "earnings_date": "2024-09-30",
+      "actual_eps": 0.97,
+      "estimated_eps": 0.95,
+      "beat": 1,
+      "surprise_pct": 2.105263157894739
+    },
+    {
+      "earnings_date": "2024-06-30",
+      "actual_eps": 1.4,
+      "estimated_eps": 1.34,
+      "beat": 1,
+      "surprise_pct": 4.477611940298495
+    }
+  ],
+  "fetched_at": "2026-05-22T17:04:02.554875"
+}

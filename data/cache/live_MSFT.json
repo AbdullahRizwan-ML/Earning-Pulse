@@ -1,0 +1,77 @@
+{
+  "features": {
+    "eps_beat_streak": 12,
+    "eps_surprise_last_q": 31.9693094629156,
+    "beat_last_q": 1.0,
+    "beat_2q_ago": 1.0,
+    "eps_growth_yoy": 0.5975232198142415,
+    "eps_acceleration": 30.329965200620517,
+    "eps_consistency": 1.0,
+    "eps_magnitude_trend": 12.262558888688094,
+    "price_ret_1m": -0.027677343789784602,
+    "price_ret_3m": -0.2085891096290708,
+    "vix_level": 26.78,
+    "yield_spread": 0.51
+  },
+  "ticker": "MSFT",
+  "sector": "Technology",
+  "earnings_history": [
+    {
+      "earnings_date": "2025-12-31",
+      "actual_eps": 5.16,
+      "estimated_eps": 3.91,
+      "beat": 1,
+      "surprise_pct": 31.9693094629156
+    },
+    {
+      "earnings_date": "2025-09-30",
+      "actual_eps": 3.72,
+      "estimated_eps": 3.66,
+      "beat": 1,
+      "surprise_pct": 1.6393442622950833
+    },
+    {
+      "earnings_date": "2025-06-30",
+      "actual_eps": 3.65,
+      "estimated_eps": 3.38,
+      "beat": 1,
+      "surprise_pct": 7.988165680473373
+    },
+    {
+      "earnings_date": "2025-03-31",
+      "actual_eps": 3.46,
+      "estimated_eps": 3.22,
+      "beat": 1,
+      "surprise_pct": 7.453416149068315
+    },
+    {
+      "earnings_date": "2024-12-31",
+      "actual_eps": 3.23,
+      "estimated_eps": 3.1,
+      "beat": 1,
+      "surprise_pct": 4.1935483870967705
+    },
+    {
+      "earnings_date": "2024-09-30",
+      "actual_eps": 3.3,
+      "estimated_eps": 3.11,
+      "beat": 1,
+      "surprise_pct": 6.109324758842442
+    },
+    {
+      "earnings_date": "2024-06-30",
+      "actual_eps": 2.95,
+      "estimated_eps": 2.93,
+      "beat": 1,
+      "surprise_pct": 0.6825938566552906
+    },
+    {
+      "earnings_date": "2024-03-31",
+      "actual_eps": 2.94,
+      "estimated_eps": 2.82,
+      "beat": 1,
+      "surprise_pct": 4.255319148936175
+    }
+  ],
+  "fetched_at": "2026-03-23T18:56:34.963512"
+}

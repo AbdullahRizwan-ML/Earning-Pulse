@@ -29,6 +29,16 @@ from src.utils import DATA_DIR, SECTOR_MAP, setup_logger
 
 log = setup_logger(__name__)
 
+
+def get_secret(key: str) -> str:
+    """Read from st.secrets first (Streamlit Cloud),
+    fall back to os.getenv (local development)."""
+    try:
+        import streamlit as st
+        return st.secrets.get(key) or os.getenv(key, "")
+    except Exception:
+        return os.getenv(key, "")
+
 # ─── Constants ─────────────────────────────────────────────────────────────────
 TRAINING_CSV = DATA_DIR / "earnings_dataset.csv"
 CACHE_DIR = DATA_DIR / "cache"
@@ -131,7 +141,7 @@ def _build_training_data() -> pd.DataFrame:
     """
     CACHE_DIR.mkdir(parents=True, exist_ok=True)
 
-    av_key = os.getenv("ALPHA_VANTAGE_API_KEY")
+    av_key = get_secret("ALPHA_VANTAGE_API_KEY")
     if not av_key or av_key == "your_key_here":
         log.error(
             "ALPHA_VANTAGE_API_KEY not set.  Cannot build training data.\n"

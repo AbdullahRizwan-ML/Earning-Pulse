@@ -20,6 +20,17 @@ from dotenv import load_dotenv
 # ─── Load environment variables ────────────────────────────────────────────────
 load_dotenv()
 
+
+def get_secret(key: str) -> str:
+    """Read from st.secrets first (Streamlit Cloud),
+    fall back to os.getenv (local development)."""
+    try:
+        import streamlit as st
+        return st.secrets.get(key) or os.getenv(key, "")
+    except Exception:
+        return os.getenv(key, "")
+
+
 # ─── Project paths ─────────────────────────────────────────────────────────────
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 DATA_DIR = PROJECT_ROOT / "data"
@@ -285,7 +296,7 @@ def get_alpha_vantage_key() -> Optional[str]:
     Returns:
         The API key string, or ``None`` if not configured.
     """
-    key = os.getenv("ALPHA_VANTAGE_API_KEY")
+    key = get_secret("ALPHA_VANTAGE_API_KEY")
     if key and key != "your_key_here":
         return key
     return None
@@ -297,7 +308,7 @@ def get_sec_api_key() -> Optional[str]:
     Returns:
         The API key string, or ``None`` if not configured.
     """
-    key = os.getenv("SEC_API_KEY")
+    key = get_secret("SEC_API_KEY")
     if key and key != "your_key_here":
         return key
     return None
@@ -309,7 +320,7 @@ def get_fred_api_key() -> Optional[str]:
     Returns:
         The API key string, or ``None`` if not configured.
     """
-    key = os.getenv("FRED_API_KEY")
+    key = get_secret("FRED_API_KEY")
     if key and key != "your_key_here":
         return key
     return None

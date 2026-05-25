@@ -26,6 +26,17 @@ from src.utils import DATA_DIR, SECTOR_MAP, setup_logger
 
 log = setup_logger(__name__)
 
+
+def get_secret(key: str) -> str:
+    """Read from st.secrets first (Streamlit Cloud),
+    fall back to os.getenv (local development)."""
+    try:
+        import streamlit as st
+        return st.secrets.get(key) or os.getenv(key, "")
+    except Exception:
+        return os.getenv(key, "")
+
+
 # ─── Constants ─────────────────────────────────────────────────────────────────
 LIVE_CACHE_DIR = DATA_DIR / "cache"
 LIVE_CACHE_TTL_HOURS = 24
@@ -83,7 +94,7 @@ def fetch_live_features(ticker: str) -> Dict[str, Any]:
         except Exception:
             pass
 
-    av_key = os.getenv("ALPHA_VANTAGE_API_KEY")
+    av_key = get_secret("ALPHA_VANTAGE_API_KEY")
     if not av_key or av_key == "your_key_here":
         raise ValueError(
             "ALPHA_VANTAGE_API_KEY not set. "

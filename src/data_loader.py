@@ -14,8 +14,11 @@ and macro context.  No OVERVIEW fundamentals (those are current-day
 snapshots and cause look-ahead leakage when applied to historical rows).
 """
 
+import argparse
+import hashlib
 import json
 import os
+import sys
 import time
 from io import StringIO
 from pathlib import Path
@@ -128,8 +131,23 @@ def load_or_build_training_data() -> pd.DataFrame:
 # ═══════════════════════════════════════════════════════════════════════════════
 # DATASET BUILDER
 # ═══════════════════════════════════════════════════════════════════════════════
-def _build_training_data() -> pd.DataFrame:
+class CacheMissError(RuntimeError):
+    """Raised in cache-only mode when a needed API response is not cached."""
+
+
+def _build_training_data(
+    output_csv: Optional[Path] = None,
+    cache_only: bool = False,
+    tickers: Optional[List[str]] = None,
+) -> pd.DataFrame:
     """Build the training CSV from Alpha Vantage + FRED.
+
+    Args:
+        output_csv: Where to write the CSV (default ``data/earnings_dataset.csv``).
+        cache_only: Read every API response from ``data/cache/`` and never
+            touch the network or require an API key.  Raises
+            ``CacheMissError`` if a response is missing.
+        tickers: Override the ticker universe (default ``TRAINING_TICKERS``).
 
     For each ticker we fetch:
       - EARNINGS (quarterly reported vs estimated EPS) — 1 AV call
@@ -139,10 +157,12 @@ def _build_training_data() -> pd.DataFrame:
     Total AV calls: 15 tickers × 2 = 30. The free tier allows 25/day,
     so the builder may need to be run across 2 days if caches are cold.
     """
+    output_csv = Path(output_csv) if output_csv else TRAINING_CSV
+    tickers = list(tickers) if tickers else TRAINING_TICKERS
     CACHE_DIR.mkdir(parents=True, exist_ok=True)
 
-    av_key = get_secret("ALPHA_VANTAGE_API_KEY")
-    if not av_key or av_key == "your_key_here":
+    av_key = "" if cache_only else get_secret("ALPHA_VANTAGE_API_KEY")
+    if not cache_only and (not av_key or av_key == "your_key_here"):
         log.error(
             "ALPHA_VANTAGE_API_KEY not set.  Cannot build training data.\n"
             "Get a free key at https://www.alphavantage.co/support/#api-key\n"
@@ -151,18 +171,19 @@ def _build_training_data() -> pd.DataFrame:
         raise RuntimeError("ALPHA_VANTAGE_API_KEY not set — cannot build training data")
 
     # ── Fetch macro data (free, no key needed) ──
-    vix_series = _fetch_fred_series("VIXCLS")
-    spread_series = _fetch_fred_series("T10Y2Y")
+    vix_series = _fetch_fred_series("VIXCLS", cache_only=cache_only)
+    spread_series = _fetch_fred_series("T10Y2Y", cache_only=cache_only)
 
     all_rows: List[Dict[str, Any]] = []
 
-    for idx, ticker in enumerate(TRAINING_TICKERS, 1):
-        log.info("Processing %s (%d/%d)", ticker, idx, len(TRAINING_TICKERS))
+    for idx, ticker in enumerate(tickers, 1):
+        log.info("Processing %s (%d/%d)", ticker, idx, len(tickers))
 
         # ── Alpha Vantage: EARNINGS ──
         earnings_data = _av_cached_request(
             ticker, "EARNINGS", av_key,
             params={"function": "EARNINGS", "symbol": ticker},
+            cache_only=cache_only,
         )
         if not earnings_data or "quarterlyEarnings" not in earnings_data:
             log.warning("No EARNINGS data for %s — skipping", ticker)
@@ -175,6 +196,7 @@ def _build_training_data() -> pd.DataFrame:
                 "function": "TIME_SERIES_MONTHLY_ADJUSTED",
                 "symbol": ticker,
             },
+            cache_only=cache_only,
         )
         monthly_ts = {}
         if monthly_data and "Monthly Adjusted Time Series" in monthly_data:
@@ -327,8 +349,8 @@ def _build_training_data() -> pd.DataFrame:
         )
 
     # Save
-    df.to_csv(TRAINING_CSV, index=False)
-    log.info("Saved training CSV to %s", TRAINING_CSV)
+    df.to_csv(output_csv, index=False)
+    log.info("Saved training CSV to %s", output_csv)
 
     # Summary
     n_rows = len(df)
@@ -422,6 +444,7 @@ def _av_cached_request(
     function: str,
     api_key: str,
     params: Optional[Dict[str, str]] = None,
+    cache_only: bool = False,
 ) -> Optional[Dict[str, Any]]:
     """Fetch from Alpha Vantage with local JSON caching.
 
@@ -433,11 +456,18 @@ def _av_cached_request(
         function: AV function name (e.g. ``"EARNINGS"``, ``"MONTHLY"``).
         api_key: Alpha Vantage API key.
         params: Query parameters for the request.
+        cache_only: Return the cached file regardless of age; raise
+            ``CacheMissError`` instead of calling the API.
 
     Returns:
         Parsed JSON dict or ``None`` on failure.
     """
     cache_file = CACHE_DIR / f"{ticker}_{function}.json"
+    if cache_only:
+        if not cache_file.exists():
+            raise CacheMissError(f"{cache_file} is not cached")
+        with open(cache_file) as f:
+            return json.load(f)
     if cache_file.exists():
         # For MONTHLY data, check if cache is less than 30 days old
         if function == "MONTHLY":
@@ -489,7 +519,7 @@ def _av_cached_request(
 # ═══════════════════════════════════════════════════════════════════════════════
 # FRED HELPERS (free, no API key)
 # ═══════════════════════════════════════════════════════════════════════════════
-def _fetch_fred_series(series_id: str) -> pd.Series:
+def _fetch_fred_series(series_id: str, cache_only: bool = False) -> pd.Series:
     """Fetch a FRED time series as a pandas Series indexed by date.
 
     Uses the free CSV endpoint (no API key required).
@@ -515,7 +545,11 @@ def _fetch_fred_series(series_id: str) -> pd.Series:
             df = df.dropna(subset=["DATE", "VALUE"])
             return df.set_index("DATE").sort_index()["VALUE"]
         except Exception:
-            pass
+            if cache_only:
+                raise
+
+    if cache_only:
+        raise CacheMissError(f"{cache_file} is not cached")
 
     url = f"https://fred.stlouisfed.org/graph/fredgraph.csv?id={series_id}"
     log.info("Fetching FRED %s ...", series_id)
@@ -572,3 +606,51 @@ def _safe_float(val: Any) -> Optional[float]:
         return float(val)
     except (TypeError, ValueError):
         return None
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# CLI: python -m src.data_loader --rebuild-from-cache [--check]
+# ═══════════════════════════════════════════════════════════════════════════════
+def file_sha256(path: Path) -> str:
+    """Hex SHA-256 of a file."""
+    return hashlib.sha256(Path(path).read_bytes()).hexdigest()
+
+
+def main(argv: Optional[List[str]] = None) -> int:
+    parser = argparse.ArgumentParser(
+        description="Rebuild data/earnings_dataset.csv from the committed API cache.",
+    )
+    parser.add_argument(
+        "--rebuild-from-cache", action="store_true", required=True,
+        help="Rebuild from data/cache/ only (no network, no API key).",
+    )
+    parser.add_argument(
+        "--output", type=Path, default=None,
+        help="Write the rebuilt CSV here (default: a temp file when --check, "
+             "else data/earnings_dataset.csv).",
+    )
+    parser.add_argument(
+        "--check", action="store_true",
+        help="Exit non-zero unless the rebuilt CSV is byte-identical to the committed one.",
+    )
+    args = parser.parse_args(argv)
+
+    import tempfile
+    with tempfile.TemporaryDirectory() as tmp:
+        output = args.output or (Path(tmp) / "rebuilt.csv" if args.check else TRAINING_CSV)
+        _build_training_data(output_csv=output, cache_only=True)
+        rebuilt_hash = file_sha256(output)
+        print(f"rebuilt  {output}  sha256={rebuilt_hash}")
+        if not args.check:
+            return 0
+        committed_hash = file_sha256(TRAINING_CSV)
+        print(f"committed {TRAINING_CSV}  sha256={committed_hash}")
+        if rebuilt_hash != committed_hash:
+            print("MISMATCH: rebuilt dataset differs from the committed CSV")
+            return 1
+        print("OK: rebuilt dataset is byte-identical to the committed CSV")
+        return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

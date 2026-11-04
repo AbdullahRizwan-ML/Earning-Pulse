@@ -64,6 +64,101 @@ LGBM_PARAMS: Dict[str, Any] = {
 }
 
 
+# Features whose outliers are clipped to the 1st/99th percentile.
+CLIP_FEATURES: List[str] = [
+    "eps_surprise_last_q", "eps_acceleration",
+    "eps_growth_yoy", "eps_magnitude_trend",
+]
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# SHARED BUILDING BLOCKS (used by training and by src.evaluate)
+# ═══════════════════════════════════════════════════════════════════════════════
+def prepare_feature_frame(df: pd.DataFrame, features: List[str]) -> pd.DataFrame:
+    """Select feature columns, coerce to numeric and fill missing values with 0."""
+    X = df[features].copy()
+    for col in X.columns:
+        X[col] = pd.to_numeric(X[col], errors="coerce")
+    return X.fillna(0)
+
+
+class FeaturePreprocessor:
+    """Quantile clipping + RobustScaler, fitted on one frame and applied to others.
+
+    ``fit`` only looks at the rows it is given, so fitting on a training split
+    keeps test-split statistics out of the transform.
+    """
+
+    def __init__(self) -> None:
+        from sklearn.preprocessing import RobustScaler
+        self.clip_bounds: Dict[str, Tuple[float, float]] = {}
+        self.scaler = RobustScaler()
+
+    def _clip(self, X: pd.DataFrame) -> pd.DataFrame:
+        X = X.copy()
+        for col, (low, high) in self.clip_bounds.items():
+            X[col] = X[col].clip(low, high)
+        if "eps_beat_streak" in X.columns:
+            X["eps_beat_streak"] = X["eps_beat_streak"].clip(0, 8)
+        return X
+
+    def fit(self, X: pd.DataFrame) -> "FeaturePreprocessor":
+        self.clip_bounds = {
+            col: (float(X[col].quantile(0.01)), float(X[col].quantile(0.99)))
+            for col in CLIP_FEATURES if col in X.columns
+        }
+        self.scaler.fit(self._clip(X))
+        return self
+
+    def clip(self, X: pd.DataFrame) -> pd.DataFrame:
+        """Apply only the clipping step (used for the imputation medians)."""
+        return self._clip(X)
+
+    def transform(self, X: pd.DataFrame) -> pd.DataFrame:
+        return pd.DataFrame(
+            self.scaler.transform(self._clip(X)), columns=X.columns, index=X.index,
+        )
+
+
+def group_shuffle_splits(
+    X: pd.DataFrame, y: pd.Series, groups: pd.Series, n_splits: int = 5,
+) -> List[Tuple[np.ndarray, np.ndarray]]:
+    """The ticker-holdout splits behind the README's CV figures."""
+    gss = GroupShuffleSplit(n_splits=n_splits, test_size=0.2, random_state=42)
+    return list(gss.split(X, y, groups))
+
+
+def fit_ensemble(
+    X_train: pd.DataFrame,
+    y_train: pd.Series,
+    X_val: Optional[pd.DataFrame] = None,
+    y_val: Optional[pd.Series] = None,
+) -> Tuple[Any, Any]:
+    """Fit the XGBoost and LightGBM members of the ensemble.
+
+    ``X_val``/``y_val`` are only passed as an eval set for logging; they do
+    not affect the fitted trees (no early stopping).
+    """
+    import xgboost as xgb
+    import lightgbm as lgb
+
+    xgb_model = xgb.XGBClassifier(**XGB_PARAMS)
+    lgbm_model = lgb.LGBMClassifier(**LGBM_PARAMS)
+    if X_val is not None and y_val is not None:
+        xgb_model.fit(X_train, y_train, eval_set=[(X_val, y_val)], verbose=False)
+        lgbm_model.fit(X_train, y_train, eval_set=[(X_val, y_val)],
+                       callbacks=[lgb.log_evaluation(period=0)])
+    else:
+        xgb_model.fit(X_train, y_train, verbose=False)
+        lgbm_model.fit(X_train, y_train, callbacks=[lgb.log_evaluation(period=0)])
+    return xgb_model, lgbm_model
+
+
+def predict_ensemble(xgb_model: Any, lgbm_model: Any, X: pd.DataFrame) -> np.ndarray:
+    """Average the two members' beat probabilities."""
+    return (xgb_model.predict_proba(X)[:, 1] + lgbm_model.predict_proba(X)[:, 1]) / 2
+
+
 # ═══════════════════════════════════════════════════════════════════════════════
 # TRAINING PIPELINE
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -88,22 +183,19 @@ def train_models(
     Returns:
         Tuple of ``(xgb_model, lgbm_model, metrics_dict)``.
     """
-    import xgboost as xgb
-    import lightgbm as lgb
-
     log.info("Training models on %d samples with %d features", len(X), X.shape[1])
     log.info("Target distribution: beat=%.1f%%, miss=%.1f%%",
              y.mean() * 100, (1 - y.mean()) * 100)
     log.info("Tickers in dataset: %s", sorted(groups.unique().tolist()))
 
-    gss = GroupShuffleSplit(n_splits=n_splits, test_size=0.2, random_state=42)
+    splits = group_shuffle_splits(X, y, groups, n_splits)
     fold_metrics: List[Dict[str, Any]] = []
 
     best_auc = -1.0
     best_xgb = None
     best_lgbm = None
 
-    for fold, (train_idx, val_idx) in enumerate(gss.split(X, y, groups), 1):
+    for fold, (train_idx, val_idx) in enumerate(splits, 1):
         X_train, X_val = X.iloc[train_idx], X.iloc[val_idx]
         y_train, y_val = y.iloc[train_idx], y.iloc[val_idx]
 
@@ -116,26 +208,8 @@ def train_models(
         print(f"  Val tickers   ({len(val_tickers)}):  {val_tickers}")
         print(f"{'='*60}")
 
-        # ── XGBoost ──
-        xgb_model = xgb.XGBClassifier(**XGB_PARAMS)
-        xgb_model.fit(
-            X_train, y_train,
-            eval_set=[(X_val, y_val)],
-            verbose=False,
-        )
-        xgb_proba = xgb_model.predict_proba(X_val)[:, 1]
-
-        # ── LightGBM ──
-        lgbm_model = lgb.LGBMClassifier(**LGBM_PARAMS)
-        lgbm_model.fit(
-            X_train, y_train,
-            eval_set=[(X_val, y_val)],
-            callbacks=[lgb.log_evaluation(period=0)],
-        )
-        lgbm_proba = lgbm_model.predict_proba(X_val)[:, 1]
-
-        # ── Ensemble ──
-        ensemble_proba = (xgb_proba + lgbm_proba) / 2
+        xgb_model, lgbm_model = fit_ensemble(X_train, y_train, X_val, y_val)
+        ensemble_proba = predict_ensemble(xgb_model, lgbm_model, X_val)
         ensemble_preds = (ensemble_proba >= 0.5).astype(int)
 
         # ── Fold metrics ──
@@ -172,14 +246,10 @@ def train_models(
     print(f"  FINAL TRAINING ON ALL {len(X)} SAMPLES")
     print(f"{'='*60}")
 
-    final_xgb = xgb.XGBClassifier(**XGB_PARAMS)
-    final_xgb.fit(X, y, verbose=False)
-
-    final_lgbm = lgb.LGBMClassifier(**LGBM_PARAMS)
-    final_lgbm.fit(X, y, callbacks=[lgb.log_evaluation(period=0)])
+    final_xgb, final_lgbm = fit_ensemble(X, y)
 
     # ── Use last fold split for final evaluation metrics ──
-    last_train_idx, last_test_idx = list(gss.split(X, y, groups))[-1]
+    last_train_idx, last_test_idx = splits[-1]
     X_test, y_test = X.iloc[last_test_idx], y.iloc[last_test_idx]
 
     metrics = evaluate_model(final_xgb, final_lgbm, X_test, y_test)
@@ -467,35 +537,18 @@ def main() -> None:
     print("\n[2/4] Preparing training data...")
     available_features = [f for f in FEATURE_COLUMNS if f in df.columns]
 
-    X = df[available_features].copy()
+    X = prepare_feature_frame(df, available_features)
     y = df[TARGET_COLUMN].copy()
     groups = df["ticker"].copy()
 
-    # Convert any remaining object columns
-    for col in X.columns:
-        X[col] = pd.to_numeric(X[col], errors="coerce")
-    X = X.fillna(0)
-
-    # Clip outliers
-    clip_features = ['eps_surprise_last_q', 'eps_acceleration',
-                     'eps_growth_yoy', 'eps_magnitude_trend']
-    for col in clip_features:
-        if col in X.columns:
-            low = X[col].quantile(0.01)
-            high = X[col].quantile(0.99)
-            X[col] = X[col].clip(low, high)
-            log.info("Clipped %s to [%.2f, %.2f]", col, low, high)
-    if 'eps_beat_streak' in X.columns:
-        X['eps_beat_streak'] = X['eps_beat_streak'].clip(0, 8)
-
-    # Scale features with RobustScaler
-    from sklearn.preprocessing import RobustScaler
-    scaler = RobustScaler()
-    X_scaled = pd.DataFrame(
-        scaler.fit_transform(X),
-        columns=X.columns,
-        index=X.index,
-    )
+    # Clip outliers and scale with RobustScaler (fitted on the full dataset,
+    # as the deployed model sees all rows)
+    preprocessor = FeaturePreprocessor().fit(X)
+    for col, (low, high) in preprocessor.clip_bounds.items():
+        log.info("Clipped %s to [%.2f, %.2f]", col, low, high)
+    X = preprocessor.clip(X)
+    X_scaled = preprocessor.transform(X)
+    scaler = preprocessor.scaler
     joblib.dump(scaler, DATA_DIR / "feature_scaler.joblib")
     log.info("Saved RobustScaler to data/feature_scaler.joblib")
 

@@ -1,0 +1,54 @@
+{
+  "dataset": {
+    "rows": 1600,
+    "tickers": 15,
+    "first_quarter_end": "1996-06-30",
+    "last_quarter_end": "2026-01-31",
+    "beat_rate": 0.6969,
+    "csv_sha256": "7260345789f30d45929ff38ef175d16286746d412030ae5daf0a0642d2bbbada"
+  },
+  "group_shuffle": {
+    "folds": 5,
+    "auc": 0.7448,
+    "accuracy": 0.7328,
+    "f1_weighted": 0.7221,
+    "majority_class_accuracy": 0.6993,
+    "eps_consistency_auc": 0.7589,
+    "distinct_tickers_held_out": 11
+  },
+  "group_shuffle_no_yoy": {
+    "folds": 5,
+    "auc": 0.7008,
+    "accuracy": 0.7314,
+    "f1_weighted": 0.7146,
+    "majority_class_accuracy": 0.6993,
+    "eps_consistency_auc": 0.7589,
+    "distinct_tickers_held_out": 11
+  },
+  "walk_forward": {
+    "first_test_year": 2010,
+    "last_test_year": 2026,
+    "test_rows": 949,
+    "auc": 0.7203,
+    "accuracy": 0.7513,
+    "majority_class_accuracy": 0.7682,
+    "eps_consistency_auc": 0.6872
+  },
+  "walk_forward_no_yoy": {
+    "first_test_year": 2010,
+    "last_test_year": 2026,
+    "test_rows": 949,
+    "auc": 0.6443,
+    "accuracy": 0.7302,
+    "majority_class_accuracy": 0.7682,
+    "eps_consistency_auc": 0.6872
+  },
+  "environment": {
+    "python": "3.11.18",
+    "pandas": "2.1.4",
+    "numpy": "1.26.4",
+    "scikit-learn": "1.4.0",
+    "xgboost": "2.0.3",
+    "lightgbm": "4.2.0"
+  }
+}
